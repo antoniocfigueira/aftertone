@@ -1,0 +1,37 @@
+name: Aftertone
+options:
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Aftertone:
+    type: application
+    platform: iOS
+    sources: [App, Audio]
+    info:
+      path: Build/Info.plist
+      properties:
+        CFBundleDisplayName: Aftertone
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [audio]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: studio.aftertone.player
+        MARKETING_VERSION: 1.0.0
+        CURRENT_PROJECT_VERSION: 1
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Audio/Aftertone.h
+        GCC_C_LANGUAGE_STANDARD: gnu11
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/.build/decoder/include"
+        LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/.build/decoder/lib"
+        OTHER_LDFLAGS: "$(inherited) -lavformat -lavcodec -lswresample -lavutil -lz -lbz2 -liconv -framework CoreMedia -framework CoreVideo -framework CoreFoundation -framework Security"
+schemes:
+  Aftertone:
+    build:
+      targets:
+        Aftertone: all
+

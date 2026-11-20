@@ -1,0 +1,56 @@
+name: Build iPhone app
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        shell: bash
+        run: |
+          set -eu
+          candidate=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)
+          test -n "$candidate"
+          sudo xcode-select -s "$candidate/Contents/Developer"
+          xcodebuild -version
+      - name: Check audio processing
+        run: |
+          clang -std=c11 -O2 -I Audio Audio/Rack.c Audio/Analysis.c Tests/AudioCheck.c -o "$RUNNER_TEMP/audio-check"
+          "$RUNNER_TEMP/audio-check"
+          clang -std=c11 -O2 -c Audio/Rack.c -o "$RUNNER_TEMP/rack.o"
+          clang -std=c11 -O2 -c Audio/Analysis.c -o "$RUNNER_TEMP/analysis.o"
+          swiftc -target "$(uname -m)-apple-macos14.0" -import-objc-header Audio/Aftertone.h App/Models.swift App/SignalGraph.swift Tests/ExportCheck.swift \
+            "$RUNNER_TEMP/rack.o" "$RUNNER_TEMP/analysis.o" -o "$RUNNER_TEMP/export-check"
+          "$RUNNER_TEMP/export-check"
+      - uses: actions/cache@v4
+        id: decoder
+        with:
+          path: .build/decoder
+          key: iphone-arm64-ffmpeg-v1-${{ hashFiles('Build/decoder.sh') }}
+      - name: Build audio decoders
+        if: steps.decoder.outputs.cache-hit != 'true'
+        run: bash Build/decoder.sh
+      - name: Compile for iPhone
+        run: |
+          command -v xcodegen || brew install xcodegen
+          xcodegen generate
+          xcodebuild -project Aftertone.xcodeproj -scheme Aftertone -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath .build/xcode \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Package for signing
+        run: |
+          mkdir -p .build/package/Payload
+          ditto .build/xcode/Build/Products/Release-iphoneos/Aftertone.app .build/package/Payload/Aftertone.app
+          cd .build/package
+          /usr/bin/zip -qry Aftertone.ipa Payload
+          unzip -tq Aftertone.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Aftertone-iPhone
+          path: .build/package/Aftertone.ipa
+          if-no-files-found: error
+
