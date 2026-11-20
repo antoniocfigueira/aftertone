@@ -25,45 +25,75 @@ struct EqualizerGraph: View {
         }
         return db
     }
-    var body: some View {
+    private func bandPoint(_ i: Int, size: CGSize) -> CGPoint {
+        let x = CGFloat(axis(mix.eqCenters[i])) * size.width
+        let y = CGFloat(0.5 - mix.eq[i] / 36.0) * size.height
+        return CGPoint(x: x, y: y)
+    }
+
+    private func closestBand(to touch: CGPoint, size: CGSize) -> Int {
+        var best = band
+        var distance = CGFloat.infinity
+        for i in mix.eq.indices {
+            let point = bandPoint(i, size: size)
+            let dx = point.x - touch.x
+            let dy = point.y - touch.y
+            let squared = dx * dx + dy * dy
+            if squared < distance { distance = squared; best = i }
+        }
+        return best
+    }
+
+    private func dragBand(to touch: CGPoint, size: CGSize) {
+        let selected = dragging ?? closestBand(to: touch, size: size)
+        if dragging == nil { band = selected; dragging = selected }
+        let x = Double(touch.x / max(1, size.width))
+        let y = Double(touch.y / max(1, size.height))
+        var next = mix
+        var centers = next.eqCenters
+        centers[selected] = min(sampleRate * 0.46, frequency(x))
+        next.centers = centers
+        next.eq[selected] = min(15, max(-15, (0.5 - y) * 36))
+        mix = next
+    }
+
+    private func drawChart(_ g: GraphicsContext, size: CGSize) {
+        let w = size.width, h = size.height
+        for hz in [30.0,100,300,1000,3000,10000] {
+            var line = Path(); let x = w*CGFloat(axis(hz))
+            line.move(to: CGPoint(x: x,y: 0)); line.addLine(to: CGPoint(x: x,y: h))
+            g.stroke(line,with: .color(.white.opacity(0.14)))
+        }
+        var curve = Path()
+        for j in 0...150 {
+            let x = Double(j)/150
+            let db = response(min(sampleRate*0.49,frequency(x)))
+            let point = CGPoint(x: CGFloat(x)*w,y: h*CGFloat(0.5-db/36))
+            if j == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
+        }
+        g.stroke(curve,with: .color(sea.opacity(0.22)),lineWidth: 6)
+        g.stroke(curve,with: .color(sea),lineWidth: 2)
+        for i in mix.eq.indices {
+            let center = bandPoint(i, size: size)
+            g.fill(Path(ellipseIn: CGRect(x: center.x-5,y: center.y-5,width: 10,height: 10)),
+                   with: .color(i == band ? .white : ultraviolet))
+        }
+    }
+
+    private var chart: some View {
+        GeometryReader { geo in
+            Canvas { context, size in drawChart(context, size: size) }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0)
+                    .onChanged { dragBand(to: $0.location, size: geo.size) }
+                    .onEnded { _ in dragging = nil })
+        }
+        .frame(height: 148)
+        .background(ink)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+    private var controls: some View {
         VStack {
-            GeometryReader { geo in
-                Canvas { g, size in
-                    let w = size.width, h = size.height
-                    for hz in [30.0,100,300,1000,3000,10000] {
-                        var line = Path(); let x = w*axis(hz)
-                        line.move(to: CGPoint(x: x,y: 0)); line.addLine(to: CGPoint(x: x,y: h))
-                        g.stroke(line,with: .color(.white.opacity(0.14)))
-                    }
-                    var curve = Path()
-                    for j in 0...150 {
-                        let x = Double(j)/150
-                        let db = response(min(sampleRate*0.49,frequency(x)))
-                        let point = CGPoint(x: x*w,y: h*(0.5-db/36))
-                        if j == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
-                    }
-                    g.stroke(curve,with: .color(sea.opacity(0.22)),lineWidth: 6)
-                    g.stroke(curve,with: .color(sea),lineWidth: 2)
-                    for i in mix.eq.indices {
-                        let x = w*axis(mix.eqCenters[i]), y = h*(0.5-mix.eq[i]/36)
-                        g.fill(Path(ellipseIn: CGRect(x: x-5,y: y-5,width: 10,height: 10)),
-                               with: .color(i == band ? .white : ultraviolet))
-                    }
-                }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { e in
-                    let x = e.location.x/max(1,geo.size.width), y = e.location.y/max(1,geo.size.height)
-                    if dragging == nil {
-                        band = mix.eq.indices.min { a,b in
-                            hypot((axis(mix.eqCenters[a])-x)*geo.size.width,(0.5-mix.eq[a]/36-y)*geo.size.height)
-                            < hypot((axis(mix.eqCenters[b])-x)*geo.size.width,(0.5-mix.eq[b]/36-y)*geo.size.height)
-                        } ?? 0
-                        dragging = band
-                    }
-                    var updated = mix, centers = mix.eqCenters
-                    centers[band] = min(sampleRate*0.46,frequency(x))
-                    updated.centers = centers; updated.eq[band] = min(15,max(-15,(0.5-y)*36))
-                    mix = updated
-                }.onEnded { _ in dragging = nil })
-            }.frame(height: 148).background(ink).clipShape(RoundedRectangle(cornerRadius: 10))
             HStack {
                 Picker("Band",selection: $band) {
                     ForEach(0..<10,id: \.self) { i in Text("Band \(i+1)").tag(i) }
@@ -79,6 +109,12 @@ struct EqualizerGraph: View {
             Parameter(name: "Q",value: Binding(get: { mix.qValues[band] },set: { q in
                 var all = mix.qValues; all[band] = q; mix.bandwidthQ = all
             }),range: 0.3...8,format: "%.2f")
+        }
+    }
+    var body: some View {
+        VStack {
+            chart
+            controls
         }
     }
 }
