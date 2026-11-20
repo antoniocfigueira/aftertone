@@ -19,6 +19,7 @@ final class Library: ObservableObject {
     @Published private(set) var catalog = Catalog()
     @Published var message: String?
     @Published var importing = false
+    @Published var importStatus: String?
     private var readable = true
     init() {
         do {
@@ -60,52 +61,62 @@ final class Library: ObservableObject {
         let songs = Dictionary(uniqueKeysWithValues: catalog.songs.map { ($0.id, $0) })
         return group.members.compactMap { songs[$0] }
     }
-    @MainActor func add(_ urls: [URL]) async {
-        guard !importing else { return }
+    @MainActor func add(_ batch: PickedAudio) async -> [Song] {
+        defer { try? FileManager.default.removeItem(at: batch.directory) }
+        guard !importing else { return [] }
         importing = true
         defer { importing = false }
-        var failures: [String] = []
-        for url in urls {
+        var failures = batch.failures
+        var added: [Song] = []
+        for (index, url) in batch.files.enumerated() {
             do {
-                let song = try await Task.detached(priority: .userInitiated) { try Self.ingest(url) }.value
-                if !edit({ $0.songs.append(song) }) { try? FileManager.default.removeItem(at: song.pcm) }
+                let position = "\(index + 1)/\(batch.files.count)"
+                importStatus = "Opening \(url.lastPathComponent) · \(position)"
+                let decoded = try await Task.detached(priority: .userInitiated) { try Self.decode(url) }.value
+                do {
+                    importStatus = "Analyzing \(url.lastPathComponent) · \(position)"
+                    let song = try await Task.detached(priority: .userInitiated) { try Self.analyze(decoded) }.value
+                    guard edit({ $0.songs.append(song) }) else { throw StudioError(message ?? "Couldn’t save the track.") }
+                    added.append(song)
+                } catch {
+                    try? FileManager.default.removeItem(at: decoded.pcm)
+                    throw error
+                }
             } catch { failures.append("\(url.lastPathComponent) — \(error.localizedDescription)") }
         }
-        if !failures.isEmpty { message = failures.joined(separator: "\n") }
+        if !failures.isEmpty {
+            importStatus = "Imported \(added.count) · Failed \(failures.count)\n" + failures.joined(separator: "\n")
+        } else {
+            importStatus = added.count == 1 ? "Added \(added[0].name) to Library" : "Added \(added.count) tracks to Library"
+        }
+        return added
     }
-    private static func ingest(_ url: URL) throws -> Song {
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
+    private static func decode(_ url: URL) throws -> Song {
         var song = Song(name: url.deletingPathExtension().lastPathComponent, ext: url.pathExtension.uppercased(),
                         sampleRate: 0, frames: 0, overview: [], bpm: 0, key: -1)
         var completed = false
         defer { if !completed { try? FileManager.default.removeItem(at: song.pcm) } }
         var rate: Int32 = 0
         var error = [CChar](repeating: 0, count: 256)
-        var coordinatorError: NSError?
-        var decodeResult: Int32 = -1
-        var nativeError: Error?
-        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinatorError) { local in
-            decodeResult = at_decode(local.path, song.pcm.path, &rate, &error, 256)
-            if decodeResult < 0 {
-                do {
-                    rate = try Self.decodeWithSystem(local, destination: song.pcm)
-                    decodeResult = 0
-                } catch { nativeError = error }
-            }
+        if at_decode(url.path, song.pcm.path, &rate, &error, 256) < 0 {
+            let decoderMessage = String(cString: error)
+            do { rate = try Self.decodeWithSystem(url, destination: song.pcm) }
+            catch { throw StudioError("Couldn’t decode this file. \(decoderMessage). \(error.localizedDescription)") }
         }
-        if let coordinatorError { throw coordinatorError }
-        guard decodeResult >= 0 else {
-            throw StudioError("Couldn’t decode this file. \(String(cString: error)). \(nativeError?.localizedDescription ?? "")")
-        }
+        song.sampleRate = Double(rate)
+        completed = true
+        return song
+    }
+    private static func analyze(_ decoded: Song) throws -> Song {
+        var song = decoded
         let mapped = try NSData(contentsOf: song.pcm, options: .alwaysMapped)
         var overview = [Float](repeating: 0, count: 512)
         var bpm: Int32 = 0, key: Int32 = -1
         song.frames = Int64(mapped.length / 8)
-        at_analyze(mapped.bytes.assumingMemoryBound(to: Float.self), song.frames, Double(rate),
+        guard song.frames > 0 else { throw StudioError("The decoded file is empty.") }
+        at_analyze(mapped.bytes.assumingMemoryBound(to: Float.self), song.frames, song.sampleRate,
                    &overview, 512, &bpm, &key)
-        song.overview = overview; song.sampleRate = Double(rate); song.bpm = Int(bpm); song.key = Int(key)
-        completed = true
+        song.overview = overview; song.bpm = Int(bpm); song.key = Int(key)
         return song
     }
     private static func decodeWithSystem(_ url: URL, destination: URL) throws -> Int32 {

@@ -48,12 +48,21 @@ struct Studio: View {
                     } label: { Image(systemName: "circle.lefthalf.filled").frame(width: 42,height: 42).glassPanel(25) }
                     .accessibilityLabel("Appearance")
                 }.padding(.horizontal,20).padding(.vertical,8)
+                if let status = library.importStatus {
+                    HStack {
+                        Text(status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+                        if !library.importing {
+                            Button { library.importStatus = nil } label: { Image(systemName: "xmark.circle") }
+                                .accessibilityLabel("Dismiss import status")
+                        }
+                    }.padding(12).glassPanel(14).padding(.horizontal,20)
+                }
                 Group {
                     switch screen {
                     case .player: playerView
                     case .library: LibraryView { song, songs in
                         queue = songs.map(\.id); player.load(song); screen = .player
-                    } importAudio: { importer = true }
+                    } importAudio: { if !library.importing { importer = true } }
                     case .effects: RackView()
                     }
                 }.frame(maxWidth: .infinity,maxHeight: .infinity)
@@ -73,18 +82,14 @@ struct Studio: View {
         }
         .buttonStyle(.plain)
         .tint(scheme == .dark ? sea : Color(red: 0.03,green: 0.43,blue: 0.35))
-        .fileImporter(isPresented: $importer, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            switch result {
-            case .success(let urls):
+        .sheet(isPresented: $importer) {
+            AudioImportPicker { batch in
+                importer = false
                 Task {
-                    let before = Set(library.catalog.songs.map(\.id))
-                    await library.add(urls)
-                    if player.song == nil, let first = library.catalog.songs.first(where: { !before.contains($0.id) }) {
-                        player.load(first, play: false)
-                    }
+                    let added = await library.add(batch)
+                    if player.song == nil, let first = added.first { player.load(first, play: false) }
                 }
-            case .failure(let error): if (error as NSError).code != NSUserCancelledError { library.message = error.localizedDescription }
-            }
+            } cancelled: { importer = false }
         }
         .onAppear {
             player.persist = { id, mix in library.update(id) { $0.mix = mix } }
