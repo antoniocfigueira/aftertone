@@ -2,7 +2,7 @@ import SwiftUI
 
 private func frequency(_ x: Double) -> Double { 20 * pow(1000, min(1,max(0,x))) }
 private func axis(_ hz: Double) -> Double { log10(hz/20)/3 }
-private let bandColors: [Color] = [.pink,.purple,.cyan]
+private let bandColors: [Color] = [StudioStyle.cyan,StudioStyle.lilac,StudioStyle.rose]
 
 struct EqualizerGraph: View {
     @Binding var mix: Mix

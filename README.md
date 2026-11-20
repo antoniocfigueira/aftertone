@@ -16,7 +16,7 @@ See [GitHub’s manual workflow instructions](https://docs.github.com/en/actions
 ## Play and edit a track
 
 - Tap **+** to pick one or more files in Files. Aftertone makes a local stereo floating-point working copy at the source sample rate. At 44.1 kHz this uses about 20 MiB per minute. Removing a track in its library menu releases that copy.
-- Use the player to seek, skip, repeat or change visualizations. The full waveform represents the source. Scope and Spectrum use the live output. BPM and key are estimates of the original recording. Silence or weak evidence can produce an unknown result.
+- Use the player to seek, skip or repeat. Open Visualizer from the floating dock to switch between Waveform, Scope and Spectrum. The full waveform represents the source. Scope and Spectrum use the live output. BPM and key are estimates of the original recording. Silence or weak evidence can produce an unknown result.
 - Use the **Library** folder button to create or edit a named, colored folder or playlist. A song’s **…** menu assigns its folder, toggles playlist membership or changes its cover. Playing a track from a filtered collection uses those tracks as the playback queue.
 - Open **Effects** to change the current track. Speed ranges from 0.25× to 3×. Choose Independent for separate pitch and tempo adjustments. In Linked · tape mode, dragging either control updates the other. The pitch offset also works at a fixed tempo. Large stretches can introduce audible artifacts.
 - The rack has ten draggable parametric EQ bands with adjustable frequency, gain and Q, full-band and three-band saturation, four reverb spaces with wet-return low/high cuts, stereo width, mono and a peak-limited preamp. Drag the **Magic** dial vertically to blend compression, saturation and tonal shaping. **Reset** restores the current track’s defaults.
@@ -25,7 +25,7 @@ See [GitHub’s manual workflow instructions](https://docs.github.com/en/actions
 
 ## Player and library gestures
 
-Hold the waveform to magnify a five-times narrower window. Drag to preview the time and release to seek. The info button reveals source key and tempo. Playback controls stay below the scrolling content. The scope and spectrum use output render callbacks and target 60 frames per second while the display is active.
+Hold the player’s progress rail or the visualizer waveform to magnify a five-times narrower window. Drag to preview the time and release to seek. The info button reveals source key and tempo. Playback controls stay below the scrolling content. The scope and spectrum use output render callbacks and target 60 frames per second while the display is active.
 
 The Albums view groups imported tracks by album and artist tags. An untagged recording appears as a single until assigned an album through the track menu. Choosing a track keeps the library open. System media commands support playback, seeking and moving through the current queue while the screen is locked.
 
@@ -43,3 +43,5 @@ The build uses unmodified [FFmpeg 8.1.3 source](https://ffmpeg.org/releases/ffmp
 
 The portable C checks cover neutral rendering, reverse, mono, gain limiting, reverb tails, spectrum, silence and a 120 BPM C-major fixture. The workflow also renders a reference track through the Apple audio engine on macOS and checks WAV duration and output frequency in neutral, pitch-locked, tape-speed and reverse modes. Signing, device playback, Files access and listening quality require testing on the target iPhone.
 
+
+The UI bundles Plus Jakarta Sans and Space Grotesk for offline use. Their SIL Open Font Licenses are included in `App/Fonts`.

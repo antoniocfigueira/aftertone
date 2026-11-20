@@ -1,70 +1,42 @@
 import SwiftUI
-
-struct StudioScroll<Content: View>: View {
-    @Namespace private var space
-    @State private var depth = 0.0
-    @ViewBuilder var content: Content
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                GeometryReader { proxy in
-                    Color.clear.preference(key: ScrollDepth.self, value: -proxy.frame(in: .named(space)).minY)
-                }.frame(height: 0)
-                content
-            }
-        }.coordinateSpace(name: space)
-            .onPreferenceChange(ScrollDepth.self) { depth = min(1,max(0,$0/32)) }
-            .overlay(alignment: .top) {
-                Rectangle().fill(.ultraThinMaterial).frame(height: 25)
-                    .mask(LinearGradient(colors: [.black,.clear],startPoint: .top,endPoint: .bottom))
-                    .opacity(depth).allowsHitTesting(false)
-            }
-    }
-}
-private struct ScrollDepth: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
+import AVFoundation
+import AVKit
 
 struct PlayerDeck: View {
     @EnvironmentObject var player: Transport
     @EnvironmentObject var library: Library
     @State private var details = false
-    @AppStorage("visualMode") private var visual = Visual.waveform.rawValue
     var advance: (Int) -> Void
     var add: () -> Void
+    var showRack: () -> Void
     private var song: Song? { library.catalog.songs.first { $0.id == player.song?.id } }
     var body: some View {
-        StudioScroll {
-            VStack(alignment: .leading,spacing: 14) {
-                OrbStage(meter: player.meter, active: player.playing, cover: song?.cover)
-                    .frame(height: 148).clipShape(RoundedRectangle(cornerRadius: 22))
-                if let song {
-                    HStack {
-                        if song.cover != nil {
-                            Sleeve(cover: song.cover).frame(width: 44,height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                        Text(song.name).font(.title.bold()).tracking(-1).lineLimit(2)
-                        Spacer()
-                        Button { details.toggle() } label: { Image(systemName: "info.circle").padding(10) }
-                            .accessibilityLabel("Track information")
+        GeometryReader { viewport in
+            StudioScroll {
+                VStack(alignment: .leading,spacing: 16) {
+                    OrbStage(meter: player.meter, active: player.playing)
+                        .frame(height: max(140,min(365,viewport.size.height*0.43)))
+                    if let song {
+                        trackHeading(song)
+                        ScrubWave(song: song,meter: player.meter,seek: player.seek).id(song.id)
+                    } else {
+                        Text("Your music").font(StudioStyle.heading(30))
+                        Button(action: add) {
+                            Label("Import from Files",systemImage: "plus").font(.headline)
+                                .padding(.vertical,12).padding(.horizontal,18)
+                                .background(.primary.opacity(0.08),in: Capsule())
+                        }.buttonStyle(.plain).disabled(library.importing)
                     }
-                    Picker("Visualization",selection: $visual) {
-                        ForEach(Visual.allCases,id: \.rawValue) { Text($0.rawValue).tag($0.rawValue) }
-                    }.pickerStyle(.segmented)
-                    if visual != Visual.waveform.rawValue {
-                        AnalyzerView(song: song,meter: player.meter,kind: Visual(rawValue: visual) ?? .scope)
-                            .padding(12).frame(height: 80).background(ink,in: RoundedRectangle(cornerRadius: 14))
-                    }
-                    ScrubWave(song: song,meter: player.meter,seek: player.seek).id(song.id)
-                } else {
-                    Text("Your turntable").font(.largeTitle.bold())
-                    Button("Import audio",action: add).buttonStyle(.borderedProminent)
-                }
-            }.padding(.horizontal,18).padding(.vertical,10)
+                }.padding(.horizontal,24).padding(.bottom,14)
+            }
         }
-        .safeAreaInset(edge: .bottom) {
-            if song != nil { transport.padding(.horizontal,18).padding(.vertical,6) }
+        .safeAreaInset(edge: .bottom,spacing: 0) {
+            if song != nil {
+                VStack(spacing: 5) {
+                    transport
+                    OutputLinks(showRack: showRack)
+                }.padding(.horizontal,20).padding(.bottom,5)
+            }
         }
         .sheet(isPresented: $details) {
             if let song {
@@ -80,6 +52,24 @@ struct PlayerDeck: View {
             }
         }
     }
+    private func trackHeading(_ song: Song) -> some View {
+        HStack(spacing: 12) {
+            if song.cover != nil {
+                Sleeve(cover: song.cover).frame(width: 44,height: 44).clipShape(RoundedRectangle(cornerRadius: 9))
+            }
+            VStack(alignment: .leading,spacing: 4) {
+                Text(song.name).font(StudioStyle.heading(27)).tracking(-0.8).lineLimit(2)
+                Text(song.artist.flatMap { $0.isEmpty ? nil : $0 } ?? song.album ?? song.ext)
+                    .font(.subheadline).foregroundStyle(StudioStyle.muted).lineLimit(1)
+            }
+            Spacer()
+            Button { details = true } label: {
+                Image(systemName: "info").frame(width: 40,height: 40)
+                    .background(.primary.opacity(0.05),in: Circle())
+                    .overlay { Circle().strokeBorder(Color.primary.opacity(0.10)) }
+            }.buttonStyle(.plain).accessibilityLabel("Track information")
+        }
+    }
     private var transport: some View {
         HStack {
             Button { player.loop.toggle() } label: {
@@ -90,7 +80,8 @@ struct PlayerDeck: View {
             Spacer()
             Button { player.toggle() } label: {
                 Image(systemName: player.playing ? "pause.fill" : "play.fill")
-                    .frame(width: 55,height: 55).foregroundStyle(.white).background(twilight,in: Circle())
+                    .frame(width: 54,height: 54).foregroundStyle(Color(uiColor: .systemBackground))
+                    .background(.primary,in: Circle()).shadow(color: .primary.opacity(0.16),radius: 9)
             }.accessibilityLabel(player.playing ? "Pause" : "Play")
             Spacer()
             Button { advance(1) } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next")
@@ -105,29 +96,49 @@ struct PlayerDeck: View {
 private struct OrbStage: View {
     @ObservedObject var meter: Meter
     var active: Bool
-    var cover: String?
     @AppStorage("reactiveOrb") private var reactive = true
     @Environment(\.accessibilityReduceMotion) private var reduce
-    @State private var image: UIImage?
     var body: some View {
         let animate = reactive && active && !reduce
         let bass = animate ? Double(meter.spectrum.prefix(17).reduce(0,+))/17 : 0
         let treble = animate ? Double(meter.spectrum.suffix(24).max() ?? 0) : 0
-        ZStack {
-            LinearGradient(colors: [ink, Color(red: 0.19,green: 0.065,blue: 0.26), .indigo.opacity(0.86)],
-                           startPoint: .bottomLeading,endPoint: .topTrailing)
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill().blur(radius: 15).opacity(0.3)
-            }
-            Orb(phase: animate ? meter.seconds*2 : 0, bass: bass, brightness: min(1,0.55*bass+0.65*treble))
-        }.task(id: cover) { image = cover.flatMap { UIImage(contentsOfFile: Song.directory.appendingPathComponent($0).path) } }
+        Orb(phase: reactive && !reduce ? meter.seconds*0.9 : 0, bass: bass, brightness: treble)
+            .frame(maxWidth: .infinity)
     }
+}
+
+private struct OutputLinks: View {
+    let showRack: () -> Void
+    @State private var output = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Audio output"
+    var body: some View {
+        HStack {
+            HStack(spacing: 2) {
+                RouteButton().frame(width: 34,height: 36)
+                Text(output).lineLimit(1)
+            }
+            Spacer()
+            Button(action: showRack) { Label("DSP rack",systemImage: "slider.horizontal.3").frame(minHeight: 36) }
+        }.font(StudioStyle.readout(12)).foregroundStyle(StudioStyle.muted).buttonStyle(.plain)
+            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in
+                output = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Audio output"
+            }
+    }
+}
+private struct RouteButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.activeTintColor = UIColor(StudioStyle.signal)
+        view.tintColor = UIColor(StudioStyle.muted)
+        return view
+    }
+    func updateUIView(_ uiView: AVRoutePickerView,context: Context) {}
 }
 
 private struct ScrubWave: View {
     let song: Song
     @ObservedObject var meter: Meter
     let seek: (Double) -> Void
+    var expanded = false
     @State private var cursor: Double?
     @State private var origin: Double?
     @State private var window: ClosedRange<Double> = 0...1
@@ -136,10 +147,21 @@ private struct ScrubWave: View {
         VStack(spacing: 6) {
             GeometryReader { geo in
                 ZStack {
-                    AnalyzerView(song: song,meter: meter,kind: .waveform,window: window,cursor: cursor)
-                    let pos = (cursor ?? meter.seconds/song.seconds)-window.lowerBound
-                    Rectangle().fill(.white).frame(width: 2)
-                        .position(x: geo.size.width*pos/(window.upperBound-window.lowerBound),y: geo.size.height/2)
+                    let isWave = expanded || window.upperBound-window.lowerBound < 0.99
+                    let relative = (cursor ?? meter.seconds/song.seconds)-window.lowerBound
+                    let fraction = min(1,max(0,relative/(window.upperBound-window.lowerBound)))
+                    if isWave {
+                        AnalyzerView(song: song,meter: meter,kind: .waveform,window: window,cursor: cursor)
+                        Rectangle().fill(.white).frame(width: 2)
+                            .position(x: geo.size.width*fraction,y: geo.size.height/2)
+                    } else {
+                        Capsule().fill(Color.primary.opacity(0.13)).frame(height: 3)
+                        Capsule().fill(twilight).frame(width: max(1,geo.size.width*fraction),height: 3)
+                            .frame(maxWidth: .infinity,alignment: .leading)
+                        Circle().fill(.primary).frame(width: 12,height: 12)
+                            .overlay { Circle().fill(StudioStyle.signal).frame(width: 4,height: 4) }
+                            .position(x: min(geo.size.width-6,max(6,geo.size.width*fraction)),y: geo.size.height/2)
+                    }
                 }.clipped().contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                         let x = min(1,max(0,value.location.x/max(1,geo.size.width)))
@@ -158,13 +180,14 @@ private struct ScrubWave: View {
                         if let cursor { seek(cursor*song.seconds) }
                         origin = nil; cursor = nil; window = 0...1
                     })
-            }.frame(height: 52).padding(8).background(ink,in: RoundedRectangle(cornerRadius: 14))
+            }.frame(height: expanded ? 128 : 44)
+                .background(expanded ? ink : Color.clear, in: RoundedRectangle(cornerRadius: 12))
             HStack {
                 Text(stamp(cursor.map { $0*song.seconds } ?? meter.seconds))
                 Spacer()
-                Text(window.lowerBound == 0 && window.upperBound == 1 ? "Hold to zoom" : "5×")
+                if window.upperBound-window.lowerBound < 0.99 { Text("5×") }
                 Spacer(); Text(stamp(song.seconds))
-            }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }.font(StudioStyle.readout(12)).foregroundStyle(StudioStyle.muted)
         }.accessibilityElement(children: .ignore).accessibilityLabel("Playback position")
             .accessibilityValue(stamp(meter.seconds))
             .accessibilityAdjustableAction { direction in seek(meter.seconds + (direction == .increment ? 5 : -5)) }
@@ -172,3 +195,33 @@ private struct ScrubWave: View {
     }
 }
 
+
+struct VisualRoom: View {
+    @EnvironmentObject var player: Transport
+    @Environment(\.studioChrome) private var chrome
+    @AppStorage("visualMode") private var mode = Visual.waveform.rawValue
+    var body: some View {
+        StudioScroll {
+            VStack(alignment: .leading,spacing: 20) {
+                Text("Visualizer").font(StudioStyle.heading(30))
+                if let song = player.song {
+                    SectionSwitch(labels: Visual.allCases.map(\.rawValue),selection: $mode)
+                    if mode != Visual.waveform.rawValue {
+                        AnalyzerView(song: song,meter: player.meter,kind: Visual(rawValue: mode) ?? .scope)
+                            .padding(14).frame(height: 220).background(ink,in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    ScrubWave(song: song,meter: player.meter,seek: player.seek,expanded: mode == Visual.waveform.rawValue).id(song.id)
+                    HStack {
+                        Text(song.name).font(StudioStyle.heading(18)).lineLimit(2)
+                        Spacer()
+                        Button { player.toggle() } label: {
+                            Image(systemName: player.playing ? "pause.fill" : "play.fill").frame(width: 46,height: 46).glassPanel(24)
+                        }.accessibilityLabel(player.playing ? "Pause" : "Play")
+                    }
+                } else {
+                    Button("Import audio",action: chrome.add).buttonStyle(.bordered)
+                }
+            }.padding(22)
+        }
+    }
+}

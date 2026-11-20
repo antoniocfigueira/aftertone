@@ -5,7 +5,7 @@ import PhotosUI
 @main struct AftertoneApp: App {
     @StateObject private var library = Library()
     @StateObject private var player = Transport()
-    @AppStorage("appearance") private var appearance = "System"
+    @AppStorage("appearance") private var appearance = "Dark"
     var body: some Scene {
         WindowGroup {
             Studio().environmentObject(library).environmentObject(player)
@@ -14,76 +14,73 @@ import PhotosUI
     }
 }
 private enum Screen: String, CaseIterable {
-    case player = "Player", library = "Library", effects = "Effects"
-    var icon: String { switch self { case .player: "waveform"; case .library: "square.stack.3d.up"; case .effects: "slider.horizontal.3" } }
+    case player = "Player", effects = "DSP rack", visual = "Visualizer", library = "Library"
+    var icon: String {
+        switch self {
+        case .player: "record.circle"
+        case .effects: "slider.horizontal.3"
+        case .visual: "waveform"
+        case .library: "square.grid.2x2"
+        }
+    }
 }
+
 private struct SlidingTabs: View {
     @Binding var screen: Screen
     @State private var finger: CGFloat?
     var body: some View {
         GeometryReader { proxy in
-            let width = proxy.size.width/3
-            let position = finger ?? CGFloat(Screen.allCases.firstIndex(of: screen) ?? 0)*width
+            let count = Screen.allCases.count
+            let cell = proxy.size.width/CGFloat(count)
+            let index = Screen.allCases.firstIndex(of: screen) ?? 0
+            let center = finger ?? cell*(CGFloat(index)+0.5)
             ZStack(alignment: .leading) {
-                Capsule().fill(twilight).opacity(0.32).frame(width: width)
-                    .overlay { Capsule().stroke(.white.opacity(0.32)) }.offset(x: position)
+                Circle().fill(Color.primary.opacity(0.09)).frame(width: 40,height: 40)
+                    .overlay { Circle().strokeBorder(Color.primary.opacity(0.09)) }
+                    .offset(x: center-20)
                 HStack(spacing: 0) {
                     ForEach(Screen.allCases,id: \.self) { item in
                         Button { screen = item } label: {
-                            VStack(spacing: 2) { Image(systemName: item.icon); Text(item.rawValue).font(.caption2) }
-                                .frame(maxWidth: .infinity,maxHeight: .infinity)
-                        }.buttonStyle(.plain).accessibilityAddTraits(screen == item ? .isSelected : [])
+                            Image(systemName: item.icon).font(.system(size: 19,weight: .medium))
+                                .foregroundStyle(screen == item ? StudioStyle.accent : StudioStyle.muted)
+                                .frame(maxWidth: .infinity,maxHeight: .infinity).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityLabel(item.rawValue)
+                            .accessibilityAddTraits(screen == item ? .isSelected : [])
                     }
                 }
-            }.contentShape(Rectangle()).simultaneousGesture(DragGesture(minimumDistance: 5)
-                .onChanged { drag in finger = min(width*2,max(0,drag.location.x-width/2)) }
-                .onEnded { drag in
-                    screen = Screen.allCases[min(2,max(0,Int(drag.location.x/max(1,width))))]
+            }.contentShape(Rectangle()).simultaneousGesture(DragGesture(minimumDistance: 6)
+                .onChanged { finger = min(proxy.size.width-cell/2,max(cell/2,$0.location.x)) }
+                .onEnded { value in
+                    let i = Int(value.location.x/max(1,cell))
+                    screen = Screen.allCases[min(count-1,max(0,i))]
                     withAnimation(.snappy) { finger = nil }
                 })
-        }.frame(height: 47).padding(4).glassPanel(30)
+        }.frame(height: 44).padding(.horizontal,8).padding(.vertical,4)
+            .glassPanel(30).frame(maxWidth: 290).padding(.horizontal,24).padding(.bottom,2)
     }
 }
 struct Studio: View {
     @EnvironmentObject var library: Library
     @EnvironmentObject var player: Transport
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var phase
     @State private var screen = Screen.player
     @State private var importer = false
     @State private var queue: [UUID] = []
-    @AppStorage("appearance") private var appearance = "System"
+    @AppStorage("appearance") private var appearance = "Dark"
     @State private var settings = false
     @AppStorage("reactiveOrb") private var reactive = true
     var body: some View {
-        NavigationStack {
-            Group {
-                if #available(iOS 26, *) {
-                    TabView(selection: $screen) {
-                        ForEach(Screen.allCases,id: \.self) { item in
-                            page(item).tabItem { Label(item.rawValue,systemImage: item.icon) }.tag(item)
-                        }
-                    }
-                } else {
-                    page(screen).safeAreaInset(edge: .bottom) {
-                        SlidingTabs(screen: $screen).padding(.horizontal,16)
-
-                    }
-                }
-            }
-            .navigationTitle(screen == .player ? "Aftertone" : screen.rawValue)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { settings = true } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { importer = true } label: { Image(systemName: "plus") }
-                        .disabled(library.importing).accessibilityLabel("Import audio")
-                }
+        GeometryReader { viewport in
+            ZStack {
+                StudioBackdrop()
+                page(screen)
+                    .environment(\.studioChrome, StudioChrome(topInset: viewport.safeAreaInsets.top,
+                        section: screen.rawValue, settings: { settings = true }, add: { importer = true }))
+                    .ignoresSafeArea(.container,edges: .top)
+                    .safeAreaInset(edge: .bottom,spacing: 4) { SlidingTabs(screen: $screen) }
             }
         }
-        .tint(scheme == .dark ? sea : .purple)
+        .tint(StudioStyle.accent)
         .sheet(isPresented: $settings) {
             NavigationStack {
                 Form {
@@ -133,26 +130,18 @@ struct Studio: View {
         if let song = library.catalog.songs.first(where: { $0.id == id }) { player.load(song) }
     }
     private func page(_ item: Screen) -> some View {
-        ZStack {
-            LinearGradient(colors: scheme == .dark ? [ink,Color(red: 0.13,green: 0.075,blue: 0.21),ink] :
-                            [Color(red: 1,green: 0.94,blue: 0.97),Color(red: 0.91,green: 0.90,blue: 0.99)],
-                           startPoint: .topLeading,endPoint: .bottomTrailing).ignoresSafeArea()
-            VStack(spacing: 0) {
-                if let status = library.importStatus {
-                    HStack {
-                        if library.importing { ProgressView() }
-                        Text(status).font(.footnote).frame(maxWidth: .infinity,alignment: .leading)
-                        if !library.importing { Button { library.importStatus = nil } label: { Image(systemName: "xmark.circle") } }
-                    }.padding(10)
-                }
-                switch item {
-                case .player: PlayerDeck(advance: { advance($0) },add: { if !library.importing { importer = true } })
-                case .library: LibraryView { song, songs in
+        Group {
+            switch item {
+            case .player:
+                PlayerDeck(advance: { advance($0) },add: { if !library.importing { importer = true } },
+                           showRack: { screen = .effects })
+            case .library:
+                LibraryView { song, songs in
                     queue = songs.map(\.id)
                     player.load(song)
                 } importAudio: { if !library.importing { importer = true } }
-                case .effects: RackView()
-                }
+            case .effects: RackView()
+            case .visual: VisualRoom()
             }
         }
     }

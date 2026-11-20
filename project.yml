@@ -11,6 +11,7 @@ targets:
       path: Build/Info.plist
       properties:
         CFBundleDisplayName: Aftertone
+        UIAppFonts: [PlusJakartaSans.ttf, SpaceGrotesk.ttf]
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -19,8 +20,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: studio.aftertone.player
-        MARKETING_VERSION: 1.1.0
-        CURRENT_PROJECT_VERSION: 3
+        MARKETING_VERSION: 1.2.0
+        CURRENT_PROJECT_VERSION: 4
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         SWIFT_OBJC_BRIDGING_HEADER: Audio/Aftertone.h

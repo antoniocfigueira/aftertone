@@ -40,14 +40,17 @@ struct LibraryView: View {
     var body: some View {
         StudioScroll {
             VStack(alignment: .leading,spacing: 18) {
-                Picker("Layout",selection: $layout) {
-                    Text("Tracks").tag("Tracks"); Text("Albums").tag("Albums")
-                }.pickerStyle(.segmented)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Library").font(StudioStyle.heading(30)).tracking(-1)
+                    Spacer()
+                    Text("\(library.catalog.songs.count) tracks").font(StudioStyle.readout(12)).foregroundStyle(StudioStyle.muted)
+                }
+                SectionSwitch(labels: ["Tracks","Albums"],selection: $layout)
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search your files",text: $search).textInputAutocapitalization(.never)
                     if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.accessibilityLabel("Clear search") }
-                }.padding(14).glassPanel(16)
+                }.padding(12).background(StudioStyle.surface.opacity(0.74),in: RoundedRectangle(cornerRadius: 12))
                 HStack {
                     Menu {
                         Button("All tracks") { groupID = nil }
@@ -88,8 +91,8 @@ struct LibraryView: View {
                                     VStack(alignment: .leading,spacing: 6) {
                                         Sleeve(cover: tracks.compactMap(\.cover).first,seed: Double(first.name.count))
                                             .aspectRatio(1,contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 14))
-                                            .shadow(color: .purple.opacity(0.24),radius: 5,y: 3)
-                                        Text(first.album ?? first.name).font(.headline).lineLimit(1)
+                                            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.08)) }
+                                        Text(first.album ?? first.name).font(StudioStyle.heading(16)).lineLimit(1)
                                         Text([first.artist, "\(tracks.count) tracks"].compactMap { $0 }.joined(separator: " · "))
                                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                     }
@@ -107,11 +110,11 @@ struct LibraryView: View {
                                     Thumb(song: song).overlay(alignment: .bottomTrailing) {
                                         if player.song?.id == song.id {
                                             Image(systemName: player.playing ? "waveform" : "pause.fill")
-                                                .font(.caption2).foregroundStyle(.white).padding(4).background(.purple,in: Circle())
+                                                .font(.caption2).foregroundStyle(ink).padding(4).background(StudioStyle.cyan,in: Circle())
                                         }
                                     }
                                     VStack(alignment: .leading,spacing: 5) {
-                                        Text(song.name).font(.headline).lineLimit(1)
+                                        Text(song.name).font(StudioStyle.heading(15)).lineLimit(1)
                                         Text("\(song.ext)  ·  \(stamp(song.seconds))").font(.caption.monospaced()).foregroundStyle(.secondary)
                                     }
                                     Spacer()

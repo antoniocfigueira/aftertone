@@ -11,9 +11,9 @@ struct Parameter: View {
     var body: some View {
         VStack(spacing: 2) {
             HStack {
-                Text(name).font(.subheadline)
+                Text(name).font(StudioStyle.readout(13))
                 Spacer()
-                Text(String(format: format,value*scale) + unit).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text(String(format: format,value*scale) + unit).font(StudioStyle.readout(12)).foregroundStyle(StudioStyle.muted)
             }
             Slider(value: $value,in: range,step: step).accessibilityLabel(name)
         }
@@ -22,17 +22,25 @@ struct Parameter: View {
 private struct Module<Content: View>: View {
     let title: String
     let icon: String
+    var accent = StudioStyle.accent
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading,spacing: 12) {
             HStack {
-                Image(systemName: icon).font(.title3).foregroundStyle(twilight)
-                Text(title).font(.title3.bold()).tracking(-0.6)
+                Image(systemName: icon).font(.system(size: 15,weight: .semibold))
+                    .foregroundStyle(accent).frame(width: 32,height: 32)
+                    .background(accent.opacity(0.11),in: RoundedRectangle(cornerRadius: 8))
+                Text(title).font(StudioStyle.heading(17)).tracking(-0.4)
                 Spacer()
             }
-            Divider()
             content
-        }.padding(16).glassPanel(20)
+        }.padding(15)
+            .background(StudioStyle.surface.opacity(0.72),in: RoundedRectangle(cornerRadius: 16))
+            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.08)) }
+            .overlay(alignment: .top) {
+                LinearGradient(colors: [.clear,accent.opacity(0.7),.clear],startPoint: .leading,endPoint: .trailing)
+                    .frame(height: 1).padding(.horizontal,16)
+            }
     }
 }
 struct RackView: View {
@@ -43,8 +51,8 @@ struct RackView: View {
         StudioScroll {
             VStack(alignment: .leading,spacing: 14) {
                 HStack {
-                    Text("Effects").font(.largeTitle.bold()).tracking(-1.5); Spacer()
-                    Button("Reset") { confirmReset = true }.disabled(p.song == nil)
+                    Text("DSP rack").font(StudioStyle.heading(28)).tracking(-0.9); Spacer()
+                    Button("Reset") { confirmReset = true }.font(StudioStyle.readout(13)).disabled(p.song == nil)
                 }
                 if let song = p.song {
                     HStack {
@@ -53,9 +61,8 @@ struct RackView: View {
                         Button { p.toggle() } label: { Image(systemName: p.playing ? "pause.fill" : "play.fill").padding(8) }
                             .accessibilityLabel(p.playing ? "Pause" : "Play")
                     }.padding(.horizontal,5)
-                    Picker("Rack section",selection: $section) {
-                        ForEach(["Motion","Tone","Space","Output"],id: \.self) { Text($0) }
-                    }.pickerStyle(.segmented)
+                    RackMonitor(meter: p.meter, playing: p.playing, rate: song.sampleRate)
+                    SectionSwitch(labels: ["Motion","Tone","Space","Output"],selection: $section)
                     if section == "Output" {
                         HStack {
                             VStack(alignment: .leading,spacing: 6) {
@@ -82,10 +89,10 @@ struct RackView: View {
                         }
                     }
                     if section == "Tone" {
-                        Module(title: "Parametric EQ",icon: "slider.vertical.3") {
+                        Module(title: "Parametric EQ",icon: "slider.vertical.3",accent: StudioStyle.signal) {
                             EqualizerGraph(mix: $p.mix,sampleRate: song.sampleRate)
                         }
-                        Module(title: "Distortion",icon: "waveform.path.ecg") {
+                        Module(title: "Distortion",icon: "waveform.path.ecg",accent: StudioStyle.adaptive(0xffb2b7,0x99465a)) {
                             DriveGraph(mix: $p.mix)
                             Parameter(name: "Full-band drive",value: $p.mix.drive,range: 0...1,format: "%.0f",unit: "%",scale: 100)
                             ForEach(0..<3,id: \.self) { i in
@@ -122,7 +129,7 @@ struct RackView: View {
                     }
                     Button { Task { await p.export() } } label: {
                         Label(p.exporting ? "Rendering…" : "Export processed WAV",systemImage: "square.and.arrow.up")
-                            .font(.headline).frame(maxWidth: .infinity).padding().glassPanel(18)
+                            .font(.headline).frame(maxWidth: .infinity).padding().background(StudioStyle.surface.opacity(0.7),in: RoundedRectangle(cornerRadius: 16))
                     }.disabled(p.exporting)
                 } else {
                     ContentUnavailableView("Choose a track",systemImage: "slider.horizontal.3",description: Text("Open a track in the library to edit its sound."))
@@ -135,3 +142,22 @@ struct RackView: View {
     }
 }
 
+
+private struct RackMonitor: View {
+    @ObservedObject var meter: Meter
+    var playing: Bool
+    var rate: Double
+    var body: some View {
+        HStack(spacing: 16) {
+            Canvas { ctx,size in
+                let dx = size.width/64
+                for (i,level) in meter.spectrum.enumerated() {
+                    let h = playing ? max(1,size.height*CGFloat(level)) : 1
+                    let rect = CGRect(x: CGFloat(i)*dx,y: size.height-h,width: max(1,dx-1),height: h)
+                    ctx.fill(Path(rect),with: .color(i<38 ? StudioStyle.cyan : StudioStyle.lilac))
+                }
+            }.frame(height: 25).accessibilityHidden(true)
+            Text("\(rate/1000,specifier: "%g") kHz").font(StudioStyle.readout(12)).foregroundStyle(StudioStyle.cyan)
+        }.padding(12).background(ink,in: RoundedRectangle(cornerRadius: 12))
+    }
+}
