@@ -17,6 +17,33 @@ private enum Screen: String, CaseIterable {
     case player = "Player", library = "Library", effects = "Effects"
     var icon: String { switch self { case .player: "waveform"; case .library: "square.stack.3d.up"; case .effects: "slider.horizontal.3" } }
 }
+private struct SlidingTabs: View {
+    @Binding var screen: Screen
+    @State private var finger: CGFloat?
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width/3
+            let position = finger ?? CGFloat(Screen.allCases.firstIndex(of: screen) ?? 0)*width
+            ZStack(alignment: .leading) {
+                Capsule().fill(twilight).opacity(0.32).frame(width: width)
+                    .overlay { Capsule().stroke(.white.opacity(0.32)) }.offset(x: position)
+                HStack(spacing: 0) {
+                    ForEach(Screen.allCases,id: \.self) { item in
+                        Button { screen = item } label: {
+                            VStack(spacing: 2) { Image(systemName: item.icon); Text(item.rawValue).font(.caption2) }
+                                .frame(maxWidth: .infinity,maxHeight: .infinity)
+                        }.buttonStyle(.plain).accessibilityAddTraits(screen == item ? .isSelected : [])
+                    }
+                }
+            }.contentShape(Rectangle()).simultaneousGesture(DragGesture(minimumDistance: 5)
+                .onChanged { drag in finger = min(width*2,max(0,drag.location.x-width/2)) }
+                .onEnded { drag in
+                    screen = Screen.allCases[min(2,max(0,Int(drag.location.x/max(1,width))))]
+                    withAnimation(.snappy) { finger = nil }
+                })
+        }.frame(height: 47).padding(4).glassPanel(30)
+    }
+}
 struct Studio: View {
     @EnvironmentObject var library: Library
     @EnvironmentObject var player: Transport
@@ -26,62 +53,47 @@ struct Studio: View {
     @State private var importer = false
     @State private var queue: [UUID] = []
     @AppStorage("appearance") private var appearance = "System"
-    @State private var visual = Visual.waveform
-    private var selected: Song? { library.catalog.songs.first { $0.id == player.song?.id } }
+    @State private var settings = false
+    @AppStorage("reactiveOrb") private var reactive = true
     var body: some View {
-        ZStack {
-            LinearGradient(colors: scheme == .dark ? [Color(red: 0.06,green: 0.12,blue: 0.15),Color(red: 0.055,green: 0.06,blue: 0.095)] :
-                [Color(red: 0.89,green: 0.95,blue: 0.93),Color(red: 0.94,green: 0.93,blue: 0.97)],
-                           startPoint: .topLeading,endPoint: .bottomTrailing).ignoresSafeArea()
-            VStack(spacing: 0) {
-                HStack {
-                    HStack(spacing: 7) {
-                        Image(systemName: "waveform.path").fontWeight(.heavy)
-                        Text("Aftertone").font(.title2.bold()).tracking(-1)
-                    }
-                    Spacer()
-                    if library.importing { ProgressView().accessibilityLabel("Importing audio") }
-                    Button { importer = true } label: { Image(systemName: "plus").frame(width: 42,height: 42).glassPanel(25) }
-                        .accessibilityLabel("Import audio").disabled(library.importing)
-                    Menu {
-                        Picker("Appearance", selection: $appearance) { ForEach(["System","Light","Dark"],id: \.self) { Text($0) } }
-                    } label: { Image(systemName: "circle.lefthalf.filled").frame(width: 42,height: 42).glassPanel(25) }
-                    .accessibilityLabel("Appearance")
-                }.padding(.horizontal,20).padding(.vertical,8)
-                if let status = library.importStatus {
-                    HStack {
-                        Text(status).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
-                        if !library.importing {
-                            Button { library.importStatus = nil } label: { Image(systemName: "xmark.circle") }
-                                .accessibilityLabel("Dismiss import status")
+        NavigationStack {
+            Group {
+                if #available(iOS 26, *) {
+                    TabView(selection: $screen) {
+                        ForEach(Screen.allCases,id: \.self) { item in
+                            page(item).tabItem { Label(item.rawValue,systemImage: item.icon) }.tag(item)
                         }
-                    }.padding(12).glassPanel(14).padding(.horizontal,20)
+                    }
+                } else {
+                    page(screen).safeAreaInset(edge: .bottom) {
+                        SlidingTabs(screen: $screen).padding(.horizontal,16)
+
+                    }
                 }
-                Group {
-                    switch screen {
-                    case .player: playerView
-                    case .library: LibraryView { song, songs in
-                        queue = songs.map(\.id); player.load(song); screen = .player
-                    } importAudio: { if !library.importing { importer = true } }
-                    case .effects: RackView()
-                    }
-                }.frame(maxWidth: .infinity,maxHeight: .infinity)
-                HStack(spacing: 4) {
-                    ForEach(Screen.allCases,id: \.self) { item in
-                        Button {
-                            withAnimation(.snappy) { screen = item }
-                        } label: {
-                            Label(item.rawValue,systemImage: item.icon).font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity).padding(.vertical,12)
-                                .foregroundStyle(item == screen ? Color.white : .primary)
-                                .background { if item == screen { Capsule().fill(ink) } }
-                        }.accessibilityAddTraits(screen == item ? .isSelected : [])
-                    }
-                }.padding(5).glassPanel(32).padding(.horizontal,16).padding(.vertical,6)
+            }
+            .navigationTitle(screen == .player ? "Aftertone" : screen.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { settings = true } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { importer = true } label: { Image(systemName: "plus") }
+                        .disabled(library.importing).accessibilityLabel("Import audio")
+                }
             }
         }
-        .buttonStyle(.plain)
-        .tint(scheme == .dark ? sea : Color(red: 0.03,green: 0.43,blue: 0.35))
+        .tint(scheme == .dark ? sea : .purple)
+        .sheet(isPresented: $settings) {
+            NavigationStack {
+                Form {
+                    Picker("Appearance",selection: $appearance) {
+                        ForEach(["System","Light","Dark"],id: \.self) { Text($0) }
+                    }
+                    Toggle("Music-reactive sphere",isOn: $reactive)
+                }.navigationTitle("Settings").toolbar { Button("Done") { settings = false } }
+            }
+        }
         .sheet(isPresented: $importer) {
             AudioImportPicker { batch in
                 importer = false
@@ -93,6 +105,7 @@ struct Studio: View {
         }
         .onAppear {
             player.persist = { id, mix in library.update(id) { $0.mix = mix } }
+            player.skip = { advance($0) }
             player.finished = { advance(1, wrap: false) }
             if player.song == nil, let first = library.catalog.songs.first { player.load(first, play: false) }
         }
@@ -119,77 +132,28 @@ struct Studio: View {
         let id = ids[(next+ids.count)%ids.count]
         if let song = library.catalog.songs.first(where: { $0.id == id }) { player.load(song) }
     }
-    private var playerView: some View {
-        ScrollView {
-            VStack(alignment: .leading,spacing: 17) {
-                ZStack(alignment: .bottomLeading) {
-                    Sleeve(cover: selected?.cover, seed: Double(selected?.name.count ?? 0)/8, playing: player.playing)
-                        .frame(maxWidth: .infinity).frame(height: 256).clipped()
-                    LinearGradient(colors: [.clear,.black.opacity(0.62)],startPoint: .center,endPoint: .bottom)
+    private func page(_ item: Screen) -> some View {
+        ZStack {
+            LinearGradient(colors: scheme == .dark ? [ink,Color(red: 0.13,green: 0.075,blue: 0.21),ink] :
+                            [Color(red: 1,green: 0.94,blue: 0.97),Color(red: 0.91,green: 0.90,blue: 0.99)],
+                           startPoint: .topLeading,endPoint: .bottomTrailing).ignoresSafeArea()
+            VStack(spacing: 0) {
+                if let status = library.importStatus {
                     HStack {
-                        Label(player.playing ? "ON AIR" : "TURNTABLE",systemImage: "circle.fill")
-                            .font(.caption2.monospaced().bold()).tracking(1.5)
-                        Spacer()
-                        Text(selected?.ext ?? "AFTERTONE").font(.caption2.monospaced()).tracking(1.5)
-                    }.foregroundStyle(.white).padding(18)
-                }.clipShape(RoundedRectangle(cornerRadius: 28))
-                if let song = selected {
-                    VStack(alignment: .leading,spacing: 5) {
-                        Text(song.name).font(.largeTitle.bold()).tracking(-1.8).lineLimit(2)
-                        Text("\(song.bpm > 0 ? "≈ \(song.bpm) BPM" : "BPM —")   ·   \(song.keyName)   ·   \(song.sampleRate / 1000, specifier: "%.1f") kHz")
-                            .font(.subheadline.monospaced()).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Picker("Visualization", selection: $visual) {
-                            ForEach(Visual.allCases,id: \.self) { Text($0.rawValue) }
-                        }.pickerStyle(.segmented)
-                    }
-                    PositionView(song: song, meter: player.meter, visual: visual, seek: player.seek)
-                    HStack {
-                        Button { player.loop.toggle() } label: {
-                            Image(systemName: "repeat.1").foregroundStyle(player.loop ? Color.accentColor : .secondary)
-                        }.accessibilityLabel(player.loop ? "Turn repeat off" : "Repeat track")
-                        Spacer()
-                        Button { advance(-1) } label: { Image(systemName: "backward.end.fill") }.accessibilityLabel("Previous track")
-                        Spacer()
-                        Button { withAnimation(.snappy) { player.toggle() } } label: {
-                            Image(systemName: player.playing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace))
-                                .font(.title2).foregroundStyle(ink).frame(width: 66,height: 66).background(sea,in: Circle())
-                        }.accessibilityLabel(player.playing ? "Pause" : "Play")
-                        Spacer()
-                        Button { advance(1) } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next track")
-                        Spacer()
-                        Button { Task { await player.export() } } label: {
-                            if player.exporting { ProgressView() } else { Image(systemName: "square.and.arrow.up") }
-                        }.disabled(player.exporting).accessibilityLabel("Export processed WAV to Files")
-                    }.font(.title3).padding(.horizontal,20)
-                } else {
-                    Text("Your turntable").font(.largeTitle.bold()).tracking(-1.6)
-                    Text("Import a track from Files to play it, shape its sound, and save your mix.").foregroundStyle(.secondary)
-                    Button { importer = true } label: {
-                        Label("Import audio",systemImage: "plus").font(.headline).foregroundStyle(ink)
-                            .padding(.horizontal,20).padding(.vertical,14).background(sea,in: Capsule())
-                    }.disabled(library.importing)
+                        if library.importing { ProgressView() }
+                        Text(status).font(.footnote).frame(maxWidth: .infinity,alignment: .leading)
+                        if !library.importing { Button { library.importStatus = nil } label: { Image(systemName: "xmark.circle") } }
+                    }.padding(10)
                 }
-            }.padding(20)
-        }
-    }
-}
-private struct PositionView: View {
-    let song: Song
-    @ObservedObject var meter: Meter
-    var visual: Visual
-    let seek: (Double) -> Void
-    @State private var drag: Double?
-    var body: some View {
-        VStack(spacing: 8) {
-            AnalyzerView(song: song,meter: meter,kind: visual).frame(height: 62).padding(10)
-                .background(ink,in: RoundedRectangle(cornerRadius: 14))
-            Slider(value: Binding(get: { drag ?? meter.seconds }, set: { drag = $0 }), in: 0...max(0.001,song.seconds), onEditingChanged: { editing in
-                if !editing, let drag { seek(drag); self.drag = nil }
-            }).accessibilityLabel("Playback position")
-            HStack { Text(stamp(drag ?? meter.seconds)); Spacer(); Text(stamp(song.seconds)) }
-                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                switch item {
+                case .player: PlayerDeck(advance: { advance($0) },add: { if !library.importing { importer = true } })
+                case .library: LibraryView { song, songs in
+                    queue = songs.map(\.id)
+                    player.load(song)
+                } importAudio: { if !library.importing { importer = true } }
+                case .effects: RackView()
+                }
+            }
         }
     }
 }

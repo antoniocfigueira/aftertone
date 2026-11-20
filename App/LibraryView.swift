@@ -7,6 +7,11 @@ struct LibraryView: View {
     var open: (Song, [Song]) -> Void
     var importAudio: () -> Void
     @State private var search = ""
+    @AppStorage("libraryLayout") private var layout = "Tracks"
+    @State private var albumID: String?
+    @State private var editingAlbum: Song?
+    @State private var albumTitle = ""
+    @State private var albumArtist = ""
     @State private var groupID: UUID?
     @State private var editor: SongGroup?
     @State private var coverSong: UUID?
@@ -14,13 +19,30 @@ struct LibraryView: View {
     @State private var photo: PhotosPickerItem?
     @State private var removal: Song?
     private var group: SongGroup? { library.catalog.groups.first { $0.id == groupID } }
+    private func albumKey(_ song: Song) -> String {
+        guard let title = song.album, !title.isEmpty else { return song.id.uuidString }
+        return (song.artist ?? "").lowercased() + "\u{1f}" + title.lowercased()
+    }
+    private var matches: [Song] {
+        library.songs(in: group).filter { song in
+            search.isEmpty || [song.name,song.album ?? "",song.artist ?? ""].contains { $0.localizedCaseInsensitiveContains(search) }
+        }
+    }
+    private var albums: [[Song]] {
+        Dictionary(grouping: matches,by: albumKey).values.sorted {
+            ($0[0].album ?? $0[0].name).localizedStandardCompare($1[0].album ?? $1[0].name) == .orderedAscending
+        }
+    }
     private var songs: [Song] {
-        library.songs(in: group).filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+        if layout == "Albums", let albumID { return matches.filter { albumKey($0) == albumID } }
+        return matches
     }
     var body: some View {
-        ScrollView {
+        StudioScroll {
             VStack(alignment: .leading,spacing: 18) {
-                Text("Library").font(.largeTitle.bold()).tracking(-1.5)
+                Picker("Layout",selection: $layout) {
+                    Text("Tracks").tag("Tracks"); Text("Albums").tag("Albums")
+                }.pickerStyle(.segmented)
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search your files",text: $search).textInputAutocapitalization(.never)
@@ -58,12 +80,36 @@ struct LibraryView: View {
                         Button("Import audio", action: importAudio).buttonStyle(.borderedProminent)
                     }
                 }
+                if layout == "Albums" && albumID == nil {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 138),spacing: 15)],spacing: 20) {
+                        ForEach(albums,id: \.first?.id) { tracks in
+                            if let first = tracks.first {
+                                Button { albumID = albumKey(first) } label: {
+                                    VStack(alignment: .leading,spacing: 6) {
+                                        Sleeve(cover: tracks.compactMap(\.cover).first,seed: Double(first.name.count))
+                                            .aspectRatio(1,contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 14))
+                                            .shadow(color: .purple.opacity(0.24),radius: 5,y: 3)
+                                        Text(first.album ?? first.name).font(.headline).lineLimit(1)
+                                        Text([first.artist, "\(tracks.count) tracks"].compactMap { $0 }.joined(separator: " · "))
+                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else {
+                    if layout == "Albums" { Button("All albums",systemImage: "chevron.left") { albumID = nil } }
                 LazyVStack(spacing: 0) {
                     ForEach(songs) { song in
                         HStack(spacing: 12) {
-                            Button { open(song,songs) } label: {
+                            Button { if player.song?.id == song.id { player.toggle() } else { open(song,songs) } } label: {
                                 HStack(spacing: 12) {
-                                    Thumb(song: song)
+                                    Thumb(song: song).overlay(alignment: .bottomTrailing) {
+                                        if player.song?.id == song.id {
+                                            Image(systemName: player.playing ? "waveform" : "pause.fill")
+                                                .font(.caption2).foregroundStyle(.white).padding(4).background(.purple,in: Circle())
+                                        }
+                                    }
                                     VStack(alignment: .leading,spacing: 5) {
                                         Text(song.name).font(.headline).lineLimit(1)
                                         Text("\(song.ext)  ·  \(stamp(song.seconds))").font(.caption.monospaced()).foregroundStyle(.secondary)
@@ -73,6 +119,9 @@ struct LibraryView: View {
                             }
                             Menu {
                                 Button("Choose cover",systemImage: "photo") { coverSong = song.id; photo = nil; showPhotos = true }
+                                Button("Edit album",systemImage: "opticaldisc") {
+                                    albumTitle = song.album ?? ""; albumArtist = song.artist ?? ""; editingAlbum = song
+                                }
                                 Menu("Move to folder") {
                                     Button("No folder") { library.update(song.id) { $0.folder = nil } }
                                     ForEach(library.catalog.groups.filter { $0.kind == .folder }) { g in
@@ -103,7 +152,23 @@ struct LibraryView: View {
                         Divider()
                     }
                 }
+                }
             }.padding(20)
+        }
+        .onChange(of: groupID) { _,_ in albumID = nil }
+        .sheet(item: $editingAlbum) { song in
+            NavigationStack {
+                Form { TextField("Album",text: $albumTitle); TextField("Album artist",text: $albumArtist) }
+                    .navigationTitle("Edit album").toolbar {
+                        Button("Save") {
+                            library.update(song.id) {
+                                $0.album = albumTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                                $0.artist = albumArtist.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                            albumID = nil; editingAlbum = nil
+                        }
+                    }
+            }.presentationDetents([.medium])
         }
         .sheet(item: $editor) { initial in GroupEditor(group: initial) { saved in
             if library.edit({ catalog in

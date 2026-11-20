@@ -24,6 +24,19 @@ final class Scope {
     deinit { at_scope_destroy(handle) }
 }
 
+// Observe each rendered hardware block. A mixer tap may coalesce several
+// blocks into one delivery, which makes a scope visibly step between frames.
+private let outputObserver: AURenderCallback = { context, flags, _, _, frames, buffer in
+    guard flags.pointee.contains(.unitRenderAction_PostRender), let buffer else { return noErr }
+    let channels = UnsafeMutableAudioBufferListPointer(buffer)
+    if let first = channels.first, let data = first.mData {
+        let right = channels.count > 1 ? channels[1].mData?.assumingMemoryBound(to: Float.self) : nil
+        at_scope_push_stereo(OpaquePointer(context), data.assumingMemoryBound(to: Float.self), right,
+                             Int32(min(frames, first.mDataByteSize / 4)))
+    }
+    return noErr
+}
+
 final class SignalGraph {
     let engine = AVAudioEngine()
     let speed = AVAudioUnitVarispeed()
@@ -64,22 +77,38 @@ final class SignalGraph {
         if offline {
             try engine.enableManualRenderingMode(.offline, format: stereo, maximumFrameCount: 4096)
         } else {
-            let output = engine.mainMixerNode.outputFormat(forBus: 0)
-            tapRate = Float(output.sampleRate)
-            engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [scope] buffer, _ in
-                if let data = buffer.floatChannelData {
-                    at_scope_push(scope.handle, data[0], Int32(buffer.frameLength))
+            tapRate = Float(song.sampleRate)
+            let status = AudioUnitAddRenderNotify(limiter.audioUnit, outputObserver, UnsafeMutableRawPointer(scope.handle))
+            if status == noErr {
+                observing = true
+            } else {
+                let output = engine.mainMixerNode
+                tapRate = Float(output.outputFormat(forBus: 0).sampleRate)
+                output.installTap(onBus: 0, bufferSize: 256, format: nil) { [scope] buffer, _ in
+                    guard let channels = buffer.floatChannelData else { return }
+                    let right = buffer.format.channelCount > 1 ? channels[1] : nil
+                    at_scope_push_stereo(scope.handle,channels[0],right,Int32(buffer.frameLength))
                 }
             }
         }
         apply(mix)
     }
+    private var observing = false
+    private var timing: (rate: Double, pitch: Double, lock: Bool)?
+    deinit {
+        engine.stop()
+        if observing { AudioUnitRemoveRenderNotify(limiter.audioUnit, outputObserver, UnsafeMutableRawPointer(scope.handle)) }
+    }
     func apply(_ mix: Mix) {
+        at_settings(voice.handle, mix.settings)
+        let requested = (mix.rate, mix.pitch, mix.lockPitch)
+        if let timing, timing == requested { return }
+        timing = requested
+        speed.bypass = mix.lockPitch || mix.rate == 1
         speed.rate = mix.lockPitch ? 1 : Float(mix.rate)
         stretch.rate = mix.lockPitch ? Float(mix.rate) : 1
         stretch.pitch = Float(mix.pitch * 100)
-        stretch.bypass = stretch.rate == 1 && mix.pitch == 0
-        at_settings(voice.handle, mix.settings)
+        stretch.bypass = (!mix.lockPitch || mix.rate == 1) && mix.pitch == 0
     }
 }
 enum WaveExport {

@@ -80,6 +80,7 @@ final class Library: ObservableObject {
                     added.append(song)
                 } catch {
                     try? FileManager.default.removeItem(at: decoded.pcm)
+                    if let cover = decoded.cover { try? FileManager.default.removeItem(at: Song.directory.appendingPathComponent(cover)) }
                     throw error
                 }
             } catch { failures.append("\(url.lastPathComponent) — \(error.localizedDescription)") }
@@ -98,10 +99,26 @@ final class Library: ObservableObject {
         defer { if !completed { try? FileManager.default.removeItem(at: song.pcm) } }
         var rate: Int32 = 0
         var error = [CChar](repeating: 0, count: 256)
-        if at_decode(url.path, song.pcm.path, &rate, &error, 256) < 0 {
+        var album = [CChar](repeating: 0,count: 512)
+        var artist = album
+        if at_decode(url.path, song.pcm.path, &rate, &error, 256, &album, &artist, 512) < 0 {
             let decoderMessage = String(cString: error)
             do { rate = try Self.decodeWithSystem(url, destination: song.pcm) }
             catch { throw StudioError("Couldn’t decode this file. \(decoderMessage). \(error.localizedDescription)") }
+        }
+        song.album = album[0] == 0 ? nil : String(cString: album)
+        song.artist = artist[0] == 0 ? nil : String(cString: artist)
+        let metadata = AVURLAsset(url: url).commonMetadata
+        func tag(_ key: AVMetadataKey) -> AVMetadataItem? {
+            AVMetadataItem.metadataItems(from: metadata, withKey: key, keySpace: .common).first
+        }
+        if song.album == nil { song.album = tag(.commonKeyAlbumName)?.stringValue }
+        if song.artist == nil { song.artist = tag(.commonKeyArtist)?.stringValue }
+        if let data = tag(.commonKeyArtwork)?.dataValue, data.count < 24_000_000,
+           let artwork = UIImage(data: data)?.preparingThumbnail(of: CGSize(width: 800,height: 800)),
+           let jpeg = artwork.jpegData(compressionQuality: 0.85) {
+            let name = song.id.uuidString + ".jpg"
+            if (try? jpeg.write(to: Song.directory.appendingPathComponent(name), options: .atomic)) != nil { song.cover = name }
         }
         song.sampleRate = Double(rate)
         completed = true

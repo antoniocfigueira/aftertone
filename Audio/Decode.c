@@ -34,7 +34,7 @@ static int drain(AVCodecContext *codec,AVFrame *frame,Writer *w) {
     }
     return e==AVERROR(EAGAIN)||e==AVERROR_EOF?0:e;
 }
-int at_decode(const char *source,const char *destination,int *rate,char *error,size_t capacity) {
+int at_decode(const char *source,const char *destination,int *rate,char *error,size_t capacity, char *album, char *artist, size_t tagCapacity) {
     AVFormatContext *fmt=NULL; AVCodecContext *codec=NULL;
     AVPacket *packet=av_packet_alloc(); AVFrame *frame=av_frame_alloc();
     Writer w={0}; const AVCodec *decoder=NULL; int stream,e=AVERROR(ENOMEM);
@@ -42,6 +42,15 @@ int at_decode(const char *source,const char *destination,int *rate,char *error,s
     if((e=avformat_open_input(&fmt,source,NULL,NULL))<0 || (e=avformat_find_stream_info(fmt,NULL))<0) goto end;
     stream=av_find_best_stream(fmt,AVMEDIA_TYPE_AUDIO,-1,-1,&decoder,0);
     if(stream<0) { e=stream; goto end; }
+    AVDictionary *tags=fmt->metadata, *streamTags=fmt->streams[stream]->metadata;
+    const AVDictionaryEntry *title=av_dict_get(tags,"album",NULL,0);
+    if(!title) title=av_dict_get(streamTags,"album",NULL,0);
+    const AVDictionaryEntry *artistTag=av_dict_get(tags,"album_artist",NULL,0);
+    if(!artistTag) artistTag=av_dict_get(streamTags,"album_artist",NULL,0);
+    if(!artistTag) artistTag=av_dict_get(tags,"artist",NULL,0);
+    if(!artistTag) artistTag=av_dict_get(streamTags,"artist",NULL,0);
+    snprintf(album,tagCapacity,"%s",title?title->value:"");
+    snprintf(artist,tagCapacity,"%s",artistTag?artistTag->value:"");
     codec=avcodec_alloc_context3(decoder); if(!codec) {e=AVERROR(ENOMEM);goto end;}
     if((e=avcodec_parameters_to_context(codec,fmt->streams[stream]->codecpar))<0 ||
        (e=avcodec_open2(codec,decoder,NULL))<0) goto end;

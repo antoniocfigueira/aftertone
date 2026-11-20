@@ -18,10 +18,18 @@ See [GitHub’s manual workflow instructions](https://docs.github.com/en/actions
 - Tap **+** to pick one or more files in Files. Aftertone makes a local stereo floating-point working copy at the source sample rate. At 44.1 kHz this uses about 20 MiB per minute. Removing a track in its library menu releases that copy.
 - Use the player to seek, skip, repeat or change visualizations. The full waveform represents the source. Scope and Spectrum use the live output. BPM and key are estimates of the original recording. Silence or weak evidence can produce an unknown result.
 - Use the **Library** folder button to create or edit a named, colored folder or playlist. A song’s **…** menu assigns its folder, toggles playlist membership or changes its cover. Playing a track from a filtered collection uses those tracks as the playback queue.
-- Open **Effects** to change the current track. Speed ranges from 0.25× to 3×. Keep pitch enabled for independent time stretching, or disable it for tape-style linked speed and pitch. The pitch offset also works at a fixed tempo. Large stretches can introduce audible artifacts.
-- The rack has ten octave-spaced EQ bands, full-band and three-band saturation, four reverb spaces with wet-return low/high cuts, stereo width, mono and a peak-limited preamp. Drag the **Magic** dial vertically to blend compression, saturation and tonal shaping. **Reset** restores the current track’s defaults.
+- Open **Effects** to change the current track. Speed ranges from 0.25× to 3×. Choose Independent for separate pitch and tempo adjustments. In Linked · tape mode, dragging either control updates the other. The pitch offset also works at a fixed tempo. Large stretches can introduce audible artifacts.
+- The rack has ten draggable parametric EQ bands with adjustable frequency, gain and Q, full-band and three-band saturation, four reverb spaces with wet-return low/high cuts, stereo width, mono and a peak-limited preamp. Drag the **Magic** dial vertically to blend compression, saturation and tonal shaping. **Reset** restores the current track’s defaults.
 - Tap the export icon or **Export processed WAV** and select a destination in Files. Playback and export use the same effects graph. Export writes a separate 24-bit stereo WAV at the track’s sample rate, with the selected rate, direction and reverb tail. A limiter reduces peaks when boosting hot material. The imported source file stays intact.
-- Use the half-filled circle in the header to choose light, dark or system appearance.
+- Open Settings using the gear to choose light, dark or system appearance and toggle the music-reactive sphere.
+
+## Player and library gestures
+
+Hold the waveform to magnify a five-times narrower window. Drag to preview the time and release to seek. The info button reveals source key and tempo. Playback controls stay below the scrolling content. The scope and spectrum use output render callbacks and target 60 frames per second while the display is active.
+
+The Albums view groups imported tracks by album and artist tags. An untagged recording appears as a single until assigned an album through the track menu. Choosing a track keeps the library open. System media commands support playback, seeking and moving through the current queue while the screen is locked.
+
+The Tone section includes draggable EQ points and two adjustable multiband drive crossovers. Space offers independent dry and wet levels and a size/damping touch pad. Existing saved mixes retain their original EQ centers, filter Q, crossovers and reverb balance.
 
 ## File support and implementation
 

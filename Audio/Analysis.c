@@ -36,17 +36,32 @@ ATScope *at_scope_create(void) {
     ATScope *s=calloc(1,sizeof(*s)); if(s) atomic_flag_clear(&s->lock); return s;
 }
 void at_scope_destroy(ATScope *s) { free(s); }
-void at_scope_push(ATScope *s,const float *samples,int count) {
+void at_scope_push_stereo(ATScope *s,const float *left,const float *right,int count) {
     if(atomic_flag_test_and_set_explicit(&s->lock,memory_order_acquire)) return;
+    // Pick the stronger channel per block so hard-panned and anti-phase
+    // material both remain visible on the mono display.
+    const float *samples=left;
+    if(right) {
+        double l=0,r=0;
+        for(int i=0;i<count;i+=8) { l+=left[i]*left[i]; r+=right[i]*right[i]; }
+        if(r>l) samples=right;
+    }
     for(int i=0;i<count;i++) { s->ring[s->cursor]=samples[i]; s->cursor=(s->cursor+1)%N; }
     atomic_flag_clear_explicit(&s->lock,memory_order_release);
+}
+void at_scope_push(ATScope *s,const float *samples,int count) {
+    at_scope_push_stereo(s,samples,NULL,count);
 }
 void at_scope_read(ATScope *s,float *wave,float *spectrum,float rate) {
     float r[N],im[N];
     if(atomic_flag_test_and_set_explicit(&s->lock,memory_order_acquire)) return;
     for(int i=0;i<N;i++) r[i]=s->ring[(s->cursor+i)%N];
     atomic_flag_clear_explicit(&s->lock,memory_order_release);
-    for(int i=0;i<128;i++) wave[i]=r[N-512+i*4];
+    int trigger=N-512;
+    for(int i=N-513;i>=N-1024;i--) {
+        if(r[i]<=0 && r[i+1]>0) { trigger=i+1; break; }
+    }
+    for(int i=0;i<128;i++) wave[i]=r[trigger+i*4];
     magnitudes(r,im,N);
     for(int b=0;b<64;b++) {
         float top=fminf(20000,rate/2);

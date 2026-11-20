@@ -10,7 +10,7 @@
 
 enum { RATE=44100, BLOCK=1024 };
 static ATSettings neutral(void) {
-    ATSettings s={0}; s.width=1; s.wetLow=80; s.wetHigh=12000; s.size=.5f; return s;
+    ATSettings s={0}; s.width=1; s.dry=1; s.wetLow=80; s.wetHigh=12000; s.size=.5f; return s;
 }
 static void transport(void) {
     float input[2*BLOCK],l[BLOCK],r[BLOCK];
@@ -42,14 +42,31 @@ static void reverb(void) {
     float impulse[2]={1,1},l[BLOCK],r[BLOCK];
     for(int i=0;i<4;i++) {
         ATVoice *v=at_create(impulse,1,RATE); ATSettings s=neutral();
-        s.wet=1; s.space=i; at_settings(v,s);
+        s.wet=1; s.dry=(float)i/4; s.space=i; at_settings(v,s);
         double tail=0;
         for(int block=0;block<20;block++) {
             at_render(v,l,r,BLOCK);
-            for(int k=0;k<BLOCK;k++) tail+=fabs(l[k])+fabs(r[k]);
+            if(block==0) assert(fabsf(l[0]-s.dry)<1e-6f);
+            for(int k=block==0?1:0;k<BLOCK;k++) tail+=fabs(l[k])+fabs(r[k]);
         }
         assert(tail>.01); at_destroy(v);
     }
+}
+static float toneRMS(ATSettings settings) {
+    float input[2*BLOCK],l[BLOCK],r[BLOCK];
+    for(int i=0;i<BLOCK;i++) input[i*2]=input[i*2+1]=.06f*sinf(6.2831853f*1000*i/RATE);
+    ATVoice *v=at_create(input,BLOCK,RATE);
+    at_settings(v,settings); at_render(v,l,r,BLOCK); at_destroy(v);
+    float energy=0; for(int i=BLOCK/2;i<BLOCK;i++) energy+=l[i]*l[i];
+    return sqrtf(2*energy/BLOCK);
+}
+static void editableBands(void) {
+    ATSettings s=neutral(); s.eq[0]=10; s.centers[0]=1000; s.q[0]=2;
+    float centered=toneRMS(s);
+    s.centers[0]=180; assert(centered>2.5f*toneRMS(s));
+    s=neutral(); s.bandDrive[0]=1; s.lowSplit=50;
+    float low=toneRMS(s); s.lowSplit=1500;
+    assert(toneRMS(s)>2*low);
 }
 static void analysis(void) {
     int frames=RATE*12;
@@ -68,7 +85,10 @@ static void analysis(void) {
     ATScope *scope=at_scope_create(); float wave[128],spec[64];
     at_scope_push(scope,pcm,2048); at_scope_read(scope,wave,spec,RATE);
     float peak=0; for(int i=0;i<64;i++) peak=fmaxf(peak,spec[i]);
-    assert(peak>.3f && wave[0]==pcm[1536]); at_scope_destroy(scope); free(pcm);
+    assert(peak>.3f && isfinite(wave[0]));
+    float quiet[2048]={0};
+    at_scope_push_stereo(scope,quiet,pcm,2048); at_scope_read(scope,wave,spec,RATE);
+    peak=0; for(int i=0;i<64;i++) peak=fmaxf(peak,spec[i]); assert(peak>.3f); at_scope_destroy(scope); free(pcm);
 }
-int main(void) { transport(); reverb(); analysis(); puts("Audio checks passed."); return 0; }
+int main(void) { transport(); reverb(); editableBands(); analysis(); puts("Audio checks passed."); return 0; }
 

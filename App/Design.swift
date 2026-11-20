@@ -10,38 +10,40 @@ extension View {
         }
     }
 }
-let sea = Color(red: 0.27, green: 0.88, blue: 0.72)
-let ink = Color(red: 0.045, green: 0.082, blue: 0.105)
+let sea = Color(red: 1.0, green: 0.46, blue: 0.72)
+let ink = Color(red: 0.045, green: 0.038, blue: 0.135)
 
 func stamp(_ seconds: Double) -> String {
     let s = max(0, Int(seconds)); return String(format: "%d:%02d", s / 60, s % 60)
 }
-struct Ribbon: View {
-    var animated: Bool
-    var seed = 0.0
-    @Environment(\.accessibilityReduceMotion) private var reduce
+let ultraviolet = Color(red: 0.55, green: 0.38, blue: 1)
+let twilight = LinearGradient(colors: [sea, ultraviolet, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
+
+struct Orb: View {
+    var phase = 0.0
+    var bass = 0.0
+    var brightness = 0.0
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1/24, paused: !animated || reduce)) { timeline in
-            let phase = animated && !reduce ? timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 60) * .pi / 30 : 0
-            Canvas { context, size in
-                let w = size.width, h = size.height, scale = min(w, h)
-                for ring in 0..<80 {
-                    let u = Double(ring)/80 * 2 * .pi
-                    var path = Path()
-                    for j in 0...112 {
-                        let t = Double(j)/112 * 2 * .pi
-                        let twist = 2*t + u + seed
-                        let r = 0.31 + 0.105*cos(twist)
-                        let x = r*cos(t), y = r*sin(t), z = 0.13*sin(twist) + 0.08*sin(t*2+phase)
-                        let xx = x*0.92 - y*0.39
-                        let yy = x*0.32 + y*0.57 - z*1.12
-                        let p = CGPoint(x: w/2 + scale*xx, y: h/2 + scale*yy)
-                        if j == 0 { path.move(to: p) } else { path.addLine(to: p) }
-                    }
-                    context.stroke(path, with: .linearGradient(Gradient(colors: [
-                        .cyan.opacity(0.32), sea.opacity(0.88), .white.opacity(0.75), .purple.opacity(0.66)
-                    ]), startPoint: CGPoint(x: 0, y: h), endPoint: CGPoint(x: w, y: 0)), lineWidth: max(0.55, scale/460))
+        Canvas { ctx, size in
+            let radius = min(size.width,size.height) * (0.39 + 0.045*bass)
+            let center = CGPoint(x: size.width/2, y: size.height/2)
+            let hot = Color(hue: 0.93 - brightness*0.14, saturation: 0.65, brightness: 1)
+            let gradient = Gradient(colors: [hot, .pink, ultraviolet, .blue])
+            ctx.fill(Path(ellipseIn: CGRect(x: center.x-radius*1.15,y: center.y-radius*1.15,width: radius*2.3,height: radius*2.3)),
+                     with: .radialGradient(Gradient(colors: [hot.opacity(0.3), .purple.opacity(0.12), .clear]), center: center, startRadius: 0, endRadius: radius*1.15))
+            for latitude in -13...13 {
+                let v = Double(latitude)/14 * .pi/2
+                var line = Path()
+                for j in 0...72 {
+                    let t = Double(j)*2 * .pi/72
+                    let r = radius*(1 + bass*0.09*sin(3*t+phase)*cos(2*v))
+                    let x = r*cos(v)*cos(t)
+                    let y = r*(sin(v)*0.94 + cos(v)*sin(t)*0.34)
+                    let point = CGPoint(x: center.x + x*0.96-y*0.28, y: center.y+x*0.28+y*0.96)
+                    if j == 0 { line.move(to: point) } else { line.addLine(to: point) }
                 }
+                ctx.stroke(line, with: .linearGradient(gradient, startPoint: .zero,
+                    endPoint: CGPoint(x: size.width,y: size.height)), lineWidth: max(0.8,radius/72))
             }
         }.accessibilityHidden(true)
     }
@@ -53,11 +55,11 @@ struct Sleeve: View {
     @State private var image: UIImage?
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.045, green: 0.14, blue: 0.17), ink, Color(red: 0.12, green: 0.08, blue: 0.20)],
+            LinearGradient(colors: [Color(red: 0.15, green: 0.055, blue: 0.26), ink, Color(red: 0.12, green: 0.08, blue: 0.20)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
-            } else { Ribbon(animated: playing, seed: seed) }
+            } else { Orb(phase: seed, bass: 0.18, brightness: seed.truncatingRemainder(dividingBy: 8)/8) }
         }
         .clipped()
         .task(id: cover) {
@@ -70,6 +72,8 @@ struct AnalyzerView: View {
     var song: Song
     @ObservedObject var meter: Meter
     var kind: Visual
+    var window: ClosedRange<Double> = 0...1
+    var cursor: Double?
     var body: some View {
         Canvas { g, size in
             let w = size.width, h = size.height
@@ -84,7 +88,9 @@ struct AnalyzerView: View {
                     let p = CGPoint(x: w*CGFloat(i)/127, y: h*(0.5-0.47*CGFloat(a)))
                     if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
                 }
-                g.stroke(path, with: .color(sea), lineWidth: 1.8)
+                let shade = GraphicsContext.Shading.linearGradient(Gradient(colors: [sea, .purple, .cyan]), startPoint: .zero, endPoint: CGPoint(x: w,y: h))
+                g.stroke(path, with: .color(sea.opacity(0.18)), lineWidth: 6)
+                g.stroke(path, with: shade, lineWidth: 1.8)
             } else {
                 let n = kind == .spectrum ? 64 : min(112, song.overview.count)
                 for i in 0..<n {
@@ -92,15 +98,18 @@ struct AnalyzerView: View {
                     let a: Float
                     if kind == .spectrum { a = meter.spectrum[i] }
                     else {
-                        let lo = i*song.overview.count/n, hi = (i+1)*song.overview.count/n
+                        let scale = Double(song.overview.count)
+                        let span = window.upperBound-window.lowerBound
+                        let lo = min(song.overview.count-1,Int(scale*(window.lowerBound + Double(i)/Double(n)*span)))
+                        let hi = min(song.overview.count,max(lo+1,Int(scale*(window.lowerBound + Double(i+1)/Double(n)*span))))
                         a = song.overview[lo..<hi].max() ?? 0
                     }
                     let height = max(2, h*0.96*CGFloat(min(1,a)))
                     let rect = CGRect(x: x,y: kind == .spectrum ? h-height : (h-height)/2,
                                       width: max(1,w/CGFloat(n)-1),height: height)
-                    let played = Double(i)/Double(n) <= meter.seconds/song.seconds
+                    let played = window.lowerBound + Double(i)/Double(n)*(window.upperBound-window.lowerBound) <= (cursor ?? meter.seconds/song.seconds)
                     g.fill(Path(roundedRect: rect, cornerRadius: 1),
-                           with: .color(kind == .spectrum || played ? sea : .white.opacity(0.45)))
+                           with: .color(kind == .spectrum ? Color(hue: 0.92-Double(i)/180,saturation: 0.65,brightness: 1) : (played ? sea : .white.opacity(0.38))))
                 }
             }
         }.accessibilityLabel(kind.rawValue)

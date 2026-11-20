@@ -37,12 +37,14 @@ static float filter(Biquad *b, int c, float x) {
 static void configure(ATVoice *v) {
     ATSettings s=v->fx;
     for(int i=0;i<10;i++) {
-        double w=2*PI*fmin(centers[i],v->rate*.46)/v->rate;
-        double a=sin(w)/(2*1.414), g=pow(10,s.eq[i]/40), den=1+a/g;
+        double w=2*PI*fmin(s.centers[i]>0?s.centers[i]:centers[i],v->rate*.46)/v->rate;
+        double a=sin(w)/(2*(s.q[i]>0?s.q[i]:1.414)), g=pow(10,s.eq[i]/40), den=1+a/g;
         Biquad *b=&v->eq[i];
         b->b0=(1+a*g)/den; b->b1=-2*cos(w)/den; b->b2=(1-a*g)/den;
         b->a1=b->b1; b->a2=(1-a/g)/den;
     }
+    v->alpha[0]=alpha(s.lowSplit>0?s.lowSplit:220,v->rate);
+    v->alpha[1]=alpha(s.highSplit>0?s.highSplit:3200,v->rate);
     v->drive=1+15*s.drive;
     for(int i=0;i<3;i++) v->drives[i]=1+15*s.bandDrive[i];
     v->gain=powf(10,s.preampDB/20);
@@ -61,7 +63,7 @@ ATVoice *at_create(const float *samples,int64_t frames,double rate) {
     atomic_flag_clear(&v->lock); atomic_init(&v->published,0); atomic_init(&v->clock,0);
     v->alpha[0]=alpha(220,rate); v->alpha[1]=alpha(3200,rate);
     v->release=1-expf(-1/(.09*rate)); v->smooth=1-expf(-1/(.005*rate));
-    v->limit=1; v->pending.width=1; v->pending.wetLow=80; v->pending.wetHigh=12000; v->dirty=1;
+    v->limit=1; v->pending.width=1; v->pending.dry=1; v->pending.wetLow=80; v->pending.wetHigh=12000; v->dirty=1;
     for(int i=0;i<8;i++) {
         v->delays[i].capacity=(int)(rate*.16)+2;
         v->delays[i].data=calloc(v->delays[i].capacity,sizeof(float));
@@ -106,7 +108,7 @@ static void room(ATVoice *v,float x[2]) {
     for(int c=0;c<2;c++) {
         v->wetBass[c]+=v->wetHP*(wet[c]-v->wetBass[c]);
         v->wetAir[c]+=v->wetLP*(wet[c]-v->wetBass[c]-v->wetAir[c]);
-        x[c]=x[c]*(1-v->fx.wet)+v->wetAir[c]*v->fx.wet;
+        x[c]=x[c]*v->fx.dry+v->wetAir[c]*v->fx.wet;
     }
 }
 void at_render(ATVoice *v,float *left,float *right,int frames) {
@@ -143,6 +145,7 @@ void at_render(ATVoice *v,float *left,float *right,int frames) {
             }
         }
         if(s->wet>0) room(v,x);
+        else { x[0]*=s->dry; x[1]*=s->dry; }
         float mid=.5f*(x[0]+x[1]), side=.5f*(x[0]-x[1])*s->width;
         x[0]=(mid+side)*v->gain; x[1]=(mid-side)*v->gain;
         float peak=fmaxf(fabsf(x[0]),fabsf(x[1]));
